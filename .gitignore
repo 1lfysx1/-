@@ -1,0 +1,66 @@
+﻿# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+*.tsbuildinfo
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+*_output.txt
+
+# Database (runtime files)
+training.db
+training.db.*
+*.sqlite
+*.sqlite3
+
+# Uploads
+uploads/
+
+# Chroma vector DB
+chroma_db/
+.chroma_cache/
+
+# ONNX models
+onnx_models/
+
+# Local model/cache files
+models_cache/
+
+# Office temporary and backup files
+~$*
+文档/
+文档/备份-*/
+
+# One-off local scratch files
+test_root.txt
+_b64script.txt
+_verify_opts.py
+backend/_test_*.py
