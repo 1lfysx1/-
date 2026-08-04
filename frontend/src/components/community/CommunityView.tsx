@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useState, type MouseEvent } from "react";
-import { ArrowLeft, CheckCircle2, Loader2, MessageSquare, Plus, Search, ThumbsUp } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, MessageSquare, Plus, Search, Sparkles, ThumbsUp } from "lucide-react";
 import { api, type CommunityQuestion } from "../../mock/api";
 import { formatDate } from "../../utils/helpers";
 import AskQuestion from "./AskQuestion";
@@ -142,6 +142,12 @@ export default function CommunityView() {
                   {question.likeCount}
                 </button>
                 <div className="flex gap-1.5 flex-1">
+                  {question.hasAggregateAnswer && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                      <Sparkles className="w-3 h-3" />
+                      已整理
+                    </span>
+                  )}
                   {question.tags.map((tag) => (
                     <span key={tag} className="text-[10px] text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-full">{tag}</span>
                   ))}

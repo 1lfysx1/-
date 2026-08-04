@@ -5,6 +5,7 @@ from datetime import datetime
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from app.database import engine, SessionLocal, Base
+from sqlalchemy import text
 from app.models.user import User
 from app.models.position import Position, Course
 from app.models.knowledge import KnowledgePoint
@@ -17,10 +18,43 @@ from app.models.feedback import Feedback
 from app.models.exam import ExperimentData
 from app.utils.security import hash_password
 
+def ensure_experiment_columns():
+    if engine.dialect.name != "sqlite":
+        return
+    required = {
+        "course_id": "VARCHAR(36)",
+        "pre_test_total": "INTEGER DEFAULT 0",
+        "pre_test_correct": "INTEGER DEFAULT 0",
+        "post_test_total": "INTEGER DEFAULT 0",
+        "post_test_correct": "INTEGER DEFAULT 0",
+    }
+    with engine.begin() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(experiment_data)")).fetchall()}
+        for column, ddl in required.items():
+            if column not in existing:
+                conn.execute(text(f"ALTER TABLE experiment_data ADD COLUMN {column} {ddl}"))
+
+def ensure_community_columns():
+    if engine.dialect.name != "sqlite":
+        return
+    required = {
+        "aggregate_answer": "TEXT",
+        "aggregate_status": "VARCHAR(20) DEFAULT 'pending'",
+        "aggregate_source": "VARCHAR(20)",
+        "aggregate_updated_at": "DATETIME",
+    }
+    with engine.begin() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(community_questions)")).fetchall()}
+        for column, ddl in required.items():
+            if column not in existing:
+                conn.execute(text(f"ALTER TABLE community_questions ADD COLUMN {column} {ddl}"))
+
 def init_database():
     print("Initializing database...")
     # Tables kept - no drop on restart
     Base.metadata.create_all(bind=engine)
+    ensure_experiment_columns()
+    ensure_community_columns()
     db = SessionLocal()
     try:
         if db.query(User).count() > 0:
@@ -60,10 +94,6 @@ def init_database():
             kp = KnowledgePoint(course_id=default_course.id, name=f"Chapter {i+1}", chapter=f"Ch{i+1}")
             db.add(kp)
         db.flush()
-
-        # Experiment data
-        for uid in users.values():
-            db.add(ExperimentData(user_id=uid, pre_test_score=50, post_test_score=80))
 
         db.commit()
         print("Database initialized!")

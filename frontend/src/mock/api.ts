@@ -12,6 +12,8 @@ export type {
   Feedback,
   KpMastery,
   Position,
+  PretestResponse,
+  PretestStatus,
   PracticalResponse,
   QAResponse,
   QASource,

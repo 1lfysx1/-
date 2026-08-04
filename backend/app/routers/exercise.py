@@ -1,9 +1,11 @@
 import json
+import random
 import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from app.database import SessionLocal
 from app.config import KNOWLEDGE_BASE_DIR
+from app.models.exam import ExperimentData
 from app.models.knowledge import CourseMaterial
 from app.models.question import Question, AnswerRecord, KnowledgePoint, UserKpMastery
 from app.models.position import Course
@@ -20,6 +22,11 @@ class AnswerItem(BaseModel):
     answer: Any
 
 class SubmitReq(BaseModel):
+    answers: list[AnswerItem]
+    courseId: str | None = None
+
+class PretestSubmitReq(BaseModel):
+    courseId: str
     answers: list[AnswerItem]
 
 def _find_knowledge_base(course_name: str):
@@ -204,6 +211,187 @@ def _dynamic_ids(kp_ids: list[str]) -> tuple[str, list[int]] | None:
     if len(course_ids) != 1:
         return None
     return next(iter(course_ids)), [int(item[2]) for item in parts]
+
+
+def _serialize_question(qn: Question):
+    opts = json.loads(qn.options) if qn.options else []
+    ans = json.loads(qn.answer) if qn.type == "multiple" else qn.answer
+    return {
+        "id": qn.id,
+        "type": qn.type,
+        "stem": qn.stem,
+        "options": opts,
+        "answer": ans,
+        "explanation": qn.explanation or "",
+        "knowledgePointId": qn.knowledge_point_id or "",
+    }
+
+
+def _course_question_query(db, course_id: str):
+    return (
+        db.query(Question)
+        .join(KnowledgePoint, Question.knowledge_point_id == KnowledgePoint.id)
+        .filter(
+            KnowledgePoint.course_id == course_id,
+            Question.is_deleted == "0",
+        )
+    )
+
+
+def _get_course_questions(db, course_id: str, limit: int = 8):
+    questions = _course_question_query(db, course_id).all()
+    random.shuffle(questions)
+    return questions[:limit]
+
+
+def _score_answers(db, answers: list[AnswerItem], persist_records: bool, user_id: str):
+    results = []
+    for ans in answers:
+        qn = db.query(Question).filter(Question.id == ans.questionId).first()
+        if not qn:
+            continue
+        if qn.type == "multiple":
+            expected = json.loads(qn.answer) if qn.answer else []
+            submitted = ans.answer if isinstance(ans.answer, list) else [ans.answer]
+            correct = sorted(submitted) == sorted(expected)
+        else:
+            expected = qn.answer
+            submitted = ans.answer
+            correct = str(submitted) == qn.answer
+        if persist_records:
+            exists = db.query(AnswerRecord).filter(AnswerRecord.user_id == user_id, AnswerRecord.question_id == ans.questionId).first()
+            if not exists:
+                db.add(AnswerRecord(user_id=user_id, question_id=ans.questionId, user_answer=str(ans.answer), is_correct="1" if correct else "0"))
+                db.flush()
+                if qn.knowledge_point_id:
+                    process_answer(user_id, qn.knowledge_point_id, correct)
+        results.append({
+            "questionId": ans.questionId,
+            "correct": correct,
+            "userAnswer": ans.answer,
+            "correctAnswer": json.loads(qn.answer) if qn.type == "multiple" else expected,
+            "explanation": qn.explanation or "",
+        })
+    return results
+
+
+def _upsert_experiment_pretest(db, user_id: str, course_id: str, score: int, total: int):
+    percent = round(score / total * 100) if total else 0
+    record = db.query(ExperimentData).filter(
+        ExperimentData.user_id == user_id,
+        ExperimentData.course_id == course_id,
+    ).first()
+    if not record:
+        record = ExperimentData(user_id=user_id, course_id=course_id, pre_test_score=percent)
+        db.add(record)
+    record.pre_test_score = percent
+    record.pre_test_total = total
+    record.pre_test_correct = score
+    return record
+
+
+def _update_experiment_posttest(db, user_id: str, course_id: str | None, score: int, total: int):
+    if not course_id or total <= 0:
+        return
+    percent = round(score / total * 100)
+    record = db.query(ExperimentData).filter(
+        ExperimentData.user_id == user_id,
+        ExperimentData.course_id == course_id,
+    ).first()
+    if not record:
+        record = ExperimentData(
+            user_id=user_id,
+            course_id=course_id,
+            pre_test_score=0,
+            pre_test_total=0,
+            pre_test_correct=0,
+        )
+        db.add(record)
+    record.post_test_score = percent
+    record.post_test_total = total
+    record.post_test_correct = score
+
+
+@router.get("/pretest/status")
+def get_pretest_status(course_id: str = Query(...), user_id: str = Depends(get_current_user_id)):
+    if not user_id:
+        raise HTTPException(401)
+    db = SessionLocal()
+    try:
+        record = db.query(ExperimentData).filter(
+            ExperimentData.user_id == user_id,
+            ExperimentData.course_id == course_id,
+        ).first()
+        question_count = _course_question_query(db, course_id).count()
+        return {
+            "success": True,
+            "data": {
+                "completed": bool(record and (record.pre_test_total or 0) > 0),
+                "questionCount": question_count,
+                "score": record.pre_test_score if record else None,
+                "total": record.pre_test_total if record else 0,
+                "correct": record.pre_test_correct if record else 0,
+            },
+        }
+    finally:
+        db.close()
+
+
+@router.get("/pretest/questions")
+def get_pretest_questions(course_id: str = Query(...), user_id: str = Depends(get_current_user_id)):
+    if not user_id:
+        raise HTTPException(401)
+    db = SessionLocal()
+    try:
+        existing = db.query(ExperimentData).filter(
+            ExperimentData.user_id == user_id,
+            ExperimentData.course_id == course_id,
+        ).first()
+        if existing and (existing.pre_test_total or 0) > 0:
+            return {"success": True, "data": []}
+        questions = _get_course_questions(db, course_id, 8)
+        return {"success": True, "data": [_serialize_question(qn) for qn in questions]}
+    finally:
+        db.close()
+
+
+@router.post("/pretest/submit")
+def submit_pretest(req: PretestSubmitReq, user_id: str = Depends(get_current_user_id)):
+    if not user_id:
+        raise HTTPException(401)
+    if not req.answers:
+        raise HTTPException(status_code=400, detail="请先完成使用前问卷")
+    db = SessionLocal()
+    try:
+        existing = db.query(ExperimentData).filter(
+            ExperimentData.user_id == user_id,
+            ExperimentData.course_id == req.courseId,
+        ).first()
+        if existing and (existing.pre_test_total or 0) > 0:
+            return {
+                "score": existing.pre_test_correct or 0,
+                "total": existing.pre_test_total or 0,
+                "percent": existing.pre_test_score or 0,
+                "alreadyCompleted": True,
+                "results": [],
+            }
+        results = _score_answers(db, req.answers, persist_records=False, user_id=user_id)
+        score = sum(1 for item in results if item["correct"])
+        total = len(results)
+        record = _upsert_experiment_pretest(db, user_id, req.courseId, score, total)
+        db.commit()
+        return {
+            "score": score,
+            "total": total,
+            "percent": record.pre_test_score,
+            "alreadyCompleted": False,
+            "results": results,
+        }
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, str(exc))
+    finally:
+        db.close()
 
 
 @router.get("/knowledge-points")
@@ -432,6 +620,8 @@ def submit(req: SubmitReq, user_id: str = Depends(get_current_user_id)):
                 "explanation": qn.explanation or ""
             })
         score = sum(1 for r in results if r["correct"])
+        _update_experiment_posttest(db, user_id, req.courseId, score, len(results))
+        db.commit()
         return {"score": score, "total": len(results), "results": results}
     except Exception as e:
         db.rollback()

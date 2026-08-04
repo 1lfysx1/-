@@ -1,11 +1,14 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+﻿import os
+
+from fastapi import APIRouter, Depends, HTTPException
 from app.database import SessionLocal
 from app.models.user import User
 from app.models.community import CommunityQuestion, CommunityAnswer
+from app.models.exam import ExperimentData
 from app.models.feedback import Feedback
-from app.models.knowledge import CourseMaterial, KnowledgePoint
+from app.models.knowledge import CourseMaterial, DocChunk, KnowledgePoint
 from app.models.position import Course, Position
-from app.models.question import AnswerRecord
+from app.models.question import AnswerRecord, Question, UserKpMastery
 from app.utils.security import get_current_admin_id
 from pydantic import BaseModel
 
@@ -18,6 +21,10 @@ class PosCreate(BaseModel):
 
 class UserStatusUpdate(BaseModel):
     isActive: bool
+
+class CourseCreate(BaseModel):
+    name: str
+    description: str = ""
 
 def serialize_position(db, position: Position) -> dict:
     return {
@@ -43,6 +50,12 @@ def ensure_default_course(db, position: Position) -> Course:
     db.flush()
     return course
 
+def count_course_questions(db, course_id: str) -> int:
+    kp_ids = [item[0] for item in db.query(KnowledgePoint.id).filter(KnowledgePoint.course_id == course_id).all()]
+    if not kp_ids:
+        return 0
+    return db.query(Question).filter(Question.knowledge_point_id.in_(kp_ids), Question.is_deleted == "0").count()
+
 def serialize_course(db, course: Course) -> dict:
     return {
         "id": course.id,
@@ -52,6 +65,7 @@ def serialize_course(db, course: Course) -> dict:
         "chapterCount": course.chapter_count or 0,
         "knowledgePointCount": db.query(KnowledgePoint).filter(KnowledgePoint.course_id == course.id).count(),
         "materialCount": db.query(CourseMaterial).filter(CourseMaterial.course_id == course.id).count(),
+        "questionCount": count_course_questions(db, course.id),
     }
 
 def user_status(user: User) -> str:
@@ -220,23 +234,41 @@ def get_scores(admin_id: str = Depends(get_current_admin_id)):
     db = SessionLocal()
     try:
         result = []
-        users = db.query(User).filter(User.role == "student").order_by(User.created_at.asc()).all()
-        for user in users:
-            records = (
+        records = (
+            db.query(ExperimentData, User, Course)
+            .join(User, ExperimentData.user_id == User.id)
+            .outerjoin(Course, ExperimentData.course_id == Course.id)
+            .filter(User.role == "student", ExperimentData.course_id.isnot(None))
+            .order_by(User.created_at.asc(), ExperimentData.created_at.asc())
+            .all()
+        )
+        for experiment, user, course in records:
+            if (experiment.pre_test_total or 0) <= 0:
+                continue
+            answer_records = (
                 db.query(AnswerRecord)
-                .filter(AnswerRecord.user_id == user.id)
+                .join(Question, AnswerRecord.question_id == Question.id)
+                .join(KnowledgePoint, Question.knowledge_point_id == KnowledgePoint.id)
+                .filter(
+                    AnswerRecord.user_id == user.id,
+                    KnowledgePoint.course_id == experiment.course_id,
+                )
                 .order_by(AnswerRecord.answered_at.asc())
                 .all()
             )
-            history = build_practice_history(records)
-            if not history:
-                continue
+            history = build_practice_history(answer_records)
             result.append({
-                "userId": user.id,
+                "userId": f"{user.id}:{experiment.course_id}",
                 "username": user.username,
                 "email": user.email,
-                "preTest": history[0]["score"],
-                "postTest": history[-1]["score"],
+                "courseId": experiment.course_id,
+                "courseName": course.name if course else "未知课程",
+                "preTest": experiment.pre_test_score,
+                "postTest": experiment.post_test_score,
+                "preTestTotal": experiment.pre_test_total or 0,
+                "preTestCorrect": experiment.pre_test_correct or 0,
+                "postTestTotal": experiment.post_test_total or 0,
+                "postTestCorrect": experiment.post_test_correct or 0,
                 "scoreHistory": history,
             })
         return {"success": True, "data": result}
@@ -249,8 +281,6 @@ def create_position(req: PosCreate, admin_id: str = Depends(get_current_admin_id
     try:
         pos = Position(name=req.name, description=req.description, icon=req.icon)
         db.add(pos)
-        db.flush()
-        ensure_default_course(db, pos)
         db.commit()
         db.refresh(pos)
         return {"success": True, "data": serialize_position(db, pos)}
@@ -268,6 +298,78 @@ def create_default_course(pos_id: str, admin_id: str = Depends(get_current_admin
         db.commit()
         db.refresh(course)
         return {"success": True, "data": serialize_course(db, course)}
+    finally:
+        db.close()
+
+@router.post("/positions/{pos_id}/courses")
+def create_course(pos_id: str, req: CourseCreate, admin_id: str = Depends(get_current_admin_id)):
+    db = SessionLocal()
+    try:
+        pos = db.query(Position).filter(Position.id == pos_id).first()
+        if not pos:
+            raise HTTPException(status_code=404, detail="岗位不存在")
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="请输入课程名称")
+        existing = db.query(Course).filter(Course.position_id == pos_id, Course.name == name).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="该岗位下已存在同名课程")
+        course = Course(position_id=pos_id, name=name, description=req.description.strip(), chapter_count=0)
+        db.add(course)
+        db.commit()
+        db.refresh(course)
+        return {"success": True, "data": serialize_course(db, course)}
+    finally:
+        db.close()
+
+@router.delete("/courses/{course_id}")
+def delete_course(course_id: str, admin_id: str = Depends(get_current_admin_id)):
+    db = SessionLocal()
+    try:
+        course = db.query(Course).filter(Course.id == course_id).first()
+        if not course:
+            raise HTTPException(status_code=404, detail="课程不存在")
+
+        materials = db.query(CourseMaterial).filter(CourseMaterial.course_id == course_id).all()
+        material_ids = [material.id for material in materials]
+        kp_ids = [item[0] for item in db.query(KnowledgePoint.id).filter(KnowledgePoint.course_id == course_id).all()]
+        questions = db.query(Question).filter(Question.knowledge_point_id.in_(kp_ids)).all() if kp_ids else []
+        question_ids = [question.id for question in questions]
+
+        deleted_counts = {
+            "materials": len(materials),
+            "knowledgePoints": len(kp_ids),
+            "questions": len(questions),
+            "chunks": db.query(DocChunk).filter(DocChunk.material_id.in_(material_ids)).count() if material_ids else 0,
+        }
+
+        if question_ids:
+            db.query(AnswerRecord).filter(AnswerRecord.question_id.in_(question_ids)).update(
+                {AnswerRecord.question_id: None},
+                synchronize_session=False,
+            )
+            db.query(Question).filter(Question.id.in_(question_ids)).delete(synchronize_session=False)
+        if kp_ids:
+            db.query(UserKpMastery).filter(UserKpMastery.kp_id.in_(kp_ids)).delete(synchronize_session=False)
+            db.query(KnowledgePoint).filter(KnowledgePoint.id.in_(kp_ids)).delete(synchronize_session=False)
+        if material_ids:
+            db.query(DocChunk).filter(DocChunk.material_id.in_(material_ids)).delete(synchronize_session=False)
+            db.query(CourseMaterial).filter(CourseMaterial.id.in_(material_ids)).delete(synchronize_session=False)
+        db.delete(course)
+        db.commit()
+
+        for material in materials:
+            if material.file_path and os.path.exists(material.file_path):
+                try:
+                    os.remove(material.file_path)
+                except OSError:
+                    pass
+        return {"success": True, "data": deleted_counts}
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

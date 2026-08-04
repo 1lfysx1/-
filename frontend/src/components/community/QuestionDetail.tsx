@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useState, type MouseEvent } from "react";
-import { CheckCircle2, Loader2, MessageSquare, Star, ThumbsUp, Trash2 } from "lucide-react";
+import { CheckCircle2, Loader2, MessageSquare, Sparkles, Star, ThumbsUp, Trash2 } from "lucide-react";
 import { api, type CommunityAnswer, type CommunityDetail } from "../../mock/api";
 import { formatDate } from "../../utils/helpers";
 
@@ -196,6 +196,26 @@ export default function QuestionDetail({ questionId }: QuestionDetailProps) {
           </span>
         </div>
       </section>
+
+      {detail.aggregateAnswer ? (
+        <section className="rounded-xl border border-amber-100 bg-amber-50/70 p-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-800">
+              <Sparkles className="h-4 w-4" />
+              智能体综合整理
+            </h2>
+            <span className="text-[10px] text-amber-600">
+              {detail.aggregateAnswer.source === "llm" ? "大模型生成" : "本地规则整理"}
+            </span>
+          </div>
+          <p className="whitespace-pre-wrap text-sm leading-7 text-amber-950">{detail.aggregateAnswer.content}</p>
+        </section>
+      ) : detail.aggregateStatus === "generating" ? (
+        <section className="rounded-xl border border-amber-100 bg-amber-50/70 p-5 text-sm text-amber-700">
+          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+          智能体正在整理大家的回答…
+        </section>
+      ) : null}
 
       {goodAnswers.length > 0 && (
         <section>

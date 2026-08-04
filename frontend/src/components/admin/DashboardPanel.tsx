@@ -27,7 +27,9 @@ export default function DashboardPanel() {
           api.admin.getPosts(),
           api.admin.getUserScores(),
         ]);
-        const latestScores = scores.map((score) => score.postTest);
+        const latestScores = scores
+          .map((score) => score.postTest)
+          .filter((score): score is number => score !== null && score !== undefined);
         const avgAccuracy = latestScores.length > 0
           ? Math.round(latestScores.reduce((total, score) => total + score, 0) / latestScores.length)
           : null;
@@ -60,14 +62,19 @@ export default function DashboardPanel() {
     { icon: Users, label: "学员总数", value: stats.users, color: "bg-indigo-50 text-indigo-500" },
     { icon: Briefcase, label: "培训岗位", value: stats.positions, color: "bg-orange-50 text-orange-500" },
     { icon: MessageSquare, label: "社区帖子", value: stats.posts, color: "bg-green-50 text-green-500" },
-    { icon: Target, label: "最近平均正确率", value: stats.avgAccuracy === null ? null : `${stats.avgAccuracy}%`, color: "bg-purple-50 text-purple-500" },
+    {
+      icon: Target,
+      label: "后测平均正确率",
+      value: stats.avgAccuracy === null ? null : `${stats.avgAccuracy}%`,
+      color: "bg-purple-50 text-purple-500",
+    },
   ];
 
   return (
     <div className="max-w-5xl mx-auto">
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900">系统概览</h2>
-        <p className="text-sm text-gray-500 mt-1">管理系统运行状态和数据统计</p>
+        <p className="text-sm text-gray-500 mt-1">管理系统运行状态和真实学习数据统计</p>
       </div>
       <div className="grid grid-cols-4 gap-4 mb-8">
         {cards.map((card) => {
@@ -85,26 +92,38 @@ export default function DashboardPanel() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-100 p-5 animate-fade-in-up">
-        <h3 className="text-sm font-semibold text-gray-800 mb-4">学员模拟练习正确率</h3>
+        <h3 className="text-sm font-semibold text-gray-800 mb-4">学员使用后模拟练习正确率</h3>
         {scoreRows.length === 0 ? (
           <div className="py-12 text-center text-sm text-gray-400">暂无真实练习数据</div>
         ) : (
           <div className="space-y-3">
-            {scoreRows.map((score) => (
-              <div key={score.userId} className="flex items-center gap-4">
-                <span className="text-xs text-gray-600 w-24 shrink-0 truncate" title={score.username}>{score.username}</span>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-indigo-500 w-10">最近</span>
-                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${Math.max(0, Math.min(100, score.postTest))}%` }} />
+            {scoreRows.map((score) => {
+              const postTest = score.postTest ?? null;
+              const barWidth = postTest === null ? 0 : Math.max(0, Math.min(100, postTest));
+
+              return (
+                <div key={score.userId} className="flex items-center gap-4">
+                  <span className="text-xs text-gray-600 w-24 shrink-0 truncate" title={score.username}>
+                    {score.username}
+                  </span>
+                  <span className="text-xs text-gray-500 w-24 shrink-0 truncate" title={score.courseName || "未绑定课程"}>
+                    {score.courseName || "未绑定课程"}
+                  </span>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-indigo-500 w-10">后测</span>
+                      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${barWidth}%` }} />
+                      </div>
+                      <span className="text-[10px] text-indigo-600 w-10 text-right">
+                        {postTest === null ? "暂无" : `${postTest}%`}
+                      </span>
                     </div>
-                    <span className="text-[10px] text-indigo-600 w-10 text-right">{score.postTest}%</span>
                   </div>
+                  <span className="text-xs text-gray-500 w-16 text-right">{score.scoreHistory.length} 次练习</span>
                 </div>
-                <span className="text-xs text-gray-500 w-16 text-right">{score.scoreHistory.length} 次练习</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -5,6 +5,8 @@
   Course,
   ExerciseResponse,
   ExerciseKnowledgePoint,
+  PretestResponse,
+  PretestStatus,
   Feedback,
   KpMastery,
   Position,
@@ -162,8 +164,14 @@ export const api = {
       const query = kpIds && kpIds.length > 0 ? `?kp_ids=${encodeURIComponent(kpIds.join(","))}` : "";
       return (await get<ApiEnvelope<Question[]>>(`/exercise/questions${query}`)).data;
     },
-    submit: (answers: { questionId: string; answer: string | string[] }[]): Promise<ExerciseResponse> =>
-      post("/exercise/submit", { answers }),
+    submit: (answers: { questionId: string; answer: string | string[] }[], courseId?: string): Promise<ExerciseResponse> =>
+      post("/exercise/submit", { answers, courseId }),
+    getPretestStatus: async (courseId: string): Promise<PretestStatus> =>
+      (await get<ApiEnvelope<PretestStatus>>(`/exercise/pretest/status?course_id=${encodeURIComponent(courseId)}`)).data,
+    getPretestQuestions: async (courseId: string): Promise<Question[]> =>
+      (await get<ApiEnvelope<Question[]>>(`/exercise/pretest/questions?course_id=${encodeURIComponent(courseId)}`)).data,
+    submitPretest: (courseId: string, answers: { questionId: string; answer: string | string[] }[]): Promise<PretestResponse> =>
+      post("/exercise/pretest/submit", { courseId, answers }),
   },
 
   progress: {
@@ -217,6 +225,10 @@ export const api = {
       (await post<ApiEnvelope<Position>>("/admin/positions", data)).data,
     createDefaultCourse: async (positionId: string): Promise<Course> =>
       (await post<ApiEnvelope<Course>>(`/admin/positions/${encodeURIComponent(positionId)}/default-course`)).data,
+    addCourse: async (positionId: string, data: { name: string; description: string }): Promise<Course> =>
+      (await post<ApiEnvelope<Course>>(`/admin/positions/${encodeURIComponent(positionId)}/courses`, data)).data,
+    deleteCourse: async (courseId: string): Promise<{ materials: number; knowledgePoints: number; questions: number; chunks: number }> =>
+      (await del<ApiEnvelope<{ materials: number; knowledgePoints: number; questions: number; chunks: number }>>(`/admin/courses/${encodeURIComponent(courseId)}`)).data,
     deletePosition: (positionId: string): Promise<{ success: boolean }> =>
       del(`/admin/positions/${encodeURIComponent(positionId)}`),
     uploadKnowledgeBase: async (courseId: string, file: File): Promise<ApiEnvelope<{ materialId: string; pages: number; chunks: number; knowledgePoints: number }>> =>

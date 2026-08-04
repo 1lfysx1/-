@@ -50,7 +50,7 @@ export default function ExerciseView() {
         questionId,
         answer,
       }));
-      const res = await api.exercise.submit(answerList);
+      const res = await api.exercise.submit(answerList, selectedCourse?.id);
       setScore(res.score);
       setResults(res.results);
       setPhase("result");

@@ -23,11 +23,13 @@ export default function CourseSelectPage({ onNext, onBack }: CourseSelectPagePro
       try {
         const data = await api.courses.list(selectedPosition.id);
         setCourses(data);
-      } catch {} finally {
+      } catch {
+        setCourses([]);
+      } finally {
         setLoading(false);
       }
     };
-    load();
+    void load();
   }, [onBack, selectedPosition]);
 
   const handleSelect = (course: Course) => {
@@ -40,7 +42,6 @@ export default function CourseSelectPage({ onNext, onBack }: CourseSelectPagePro
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Header */}
       <header className="bg-white border-b border-gray-100">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -73,6 +74,15 @@ export default function CourseSelectPage({ onNext, onBack }: CourseSelectPagePro
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="w-8 h-8 animate-spin text-orange-400" />
+          </div>
+        ) : courses.length === 0 ? (
+          <div className="w-full max-w-xl rounded-2xl border border-gray-100 bg-white px-6 py-10 text-center shadow-sm">
+            <BookOpen className="mx-auto mb-4 h-10 w-10 text-gray-300" />
+            <h2 className="text-base font-semibold text-gray-900">该岗位暂无课程</h2>
+            <p className="mt-2 text-sm leading-relaxed text-gray-500">请管理员先在后台“岗位与知识库管理”中新增细分课程，例如 Python、C、Java，再上传对应知识库和题库。</p>
+            <button onClick={onBack} className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-orange-500 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-orange-600">
+              返回选择岗位
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-3xl animate-stagger">
@@ -116,7 +126,3 @@ export default function CourseSelectPage({ onNext, onBack }: CourseSelectPagePro
     </div>
   );
 }
-
-
-
-

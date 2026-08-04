@@ -27,6 +27,7 @@ export interface Course {
   chapterCount: number;
   knowledgePointCount: number;
   materialCount: number;
+  questionCount?: number;
 }
 
 export interface QASource {
@@ -43,8 +44,14 @@ export interface QAResponse {
 
 export interface Step {
   index: number;
+  title?: string;
   instruction: string;
   description: string;
+  commands?: { language?: string; code: string; comment?: string }[];
+  commandComment?: string;
+  notes?: string[];
+  warnings?: string[];
+  verification?: string;
   expectedResult?: string;
   hasImage: boolean;
   screenshotHint?: string;
@@ -58,6 +65,8 @@ export interface PracticalResponse {
   title: string;
   intent?: string;
   source?: "llm" | "fallback";
+  summary?: string;
+  prerequisites?: string[];
   steps: Step[];
 }
 
@@ -85,6 +94,19 @@ export interface ExerciseResponse {
   score: number;
   total: number;
   results: ExerciseResult[];
+}
+
+export interface PretestStatus {
+  completed: boolean;
+  questionCount: number;
+  score?: number | null;
+  total?: number;
+  correct?: number;
+}
+
+export interface PretestResponse extends ExerciseResponse {
+  percent: number;
+  alreadyCompleted?: boolean;
 }
 
 export interface KpMastery {
@@ -126,6 +148,7 @@ export interface CommunityQuestion {
   likeCount: number;
   hasLiked?: boolean;
   hasGoodAnswer: boolean;
+  hasAggregateAnswer?: boolean;
 }
 
 export interface CommunityAnswer {
@@ -144,6 +167,12 @@ export interface CommunityAnswer {
 export interface CommunityDetail {
   question: CommunityQuestion;
   answers: CommunityAnswer[];
+  aggregateAnswer?: {
+    content: string;
+    source: "llm" | "fallback";
+    updatedAt: string;
+  } | null;
+  aggregateStatus?: "pending" | "generating" | "ready" | "failed";
 }
 
 export interface WrongQuestion {
@@ -179,8 +208,14 @@ export interface UserScore {
   userId: string;
   username: string;
   email: string;
-  preTest: number;
-  postTest: number;
+  courseId?: string;
+  courseName?: string;
+  preTest: number | null;
+  postTest: number | null;
+  preTestTotal?: number;
+  preTestCorrect?: number;
+  postTestTotal?: number;
+  postTestCorrect?: number;
   scoreHistory: { date: string; score: number; total?: number; correct?: number }[];
 }
 

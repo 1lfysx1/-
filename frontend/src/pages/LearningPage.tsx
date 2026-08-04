@@ -9,6 +9,8 @@ import CommunityView from "../components/community/CommunityView";
 import WrongQuestionsView from "../components/personal/WrongQuestionsView";
 import LearningPlatformView from "../components/learning/LearningPlatformView";
 import FeedbackView from "../components/learning/FeedbackView";
+import { api } from "../mock/api";
+import { useApp } from "../contexts/useApp";
 
 function getTabFromHash(): TabKey {
   const params = new URLSearchParams(window.location.hash.split("?")[1] || "");
@@ -16,6 +18,7 @@ function getTabFromHash(): TabKey {
 }
 
 export default function LearningPage() {
+  const { selectedCourse } = useApp();
   const [activeTab, setActiveTab] = useState<TabKey>(getTabFromHash);
 
   const handleHashChange = useCallback(() => {
@@ -26,6 +29,21 @@ export default function LearningPage() {
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, [handleHashChange]);
+
+  useEffect(() => {
+    const checkPretest = async () => {
+      if (!selectedCourse?.id) return;
+      try {
+        const status = await api.exercise.getPretestStatus(selectedCourse.id);
+        if (!status.completed && status.questionCount > 0) {
+          window.location.hash = "#/pretest";
+        }
+      } catch {
+        // Keep the learning page usable if the auxiliary check fails.
+      }
+    };
+    void checkPretest();
+  }, [selectedCourse?.id]);
 
   const handleTabChange = (tab: TabKey) => {
     window.location.hash = `#/learning?tab=${tab}`;

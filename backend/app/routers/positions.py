@@ -2,10 +2,17 @@
 
 from app.database import SessionLocal
 from app.models.knowledge import CourseMaterial, KnowledgePoint
+from app.models.question import Question
 from app.models.position import Course, Position
 
 router = APIRouter(prefix="/api", tags=["Positions"])
 
+
+def count_course_questions(db, course_id: str) -> int:
+    kp_ids = [item[0] for item in db.query(KnowledgePoint.id).filter(KnowledgePoint.course_id == course_id).all()]
+    if not kp_ids:
+        return 0
+    return db.query(Question).filter(Question.knowledge_point_id.in_(kp_ids), Question.is_deleted == "0").count()
 
 def serialize_course(db, course: Course) -> dict:
     return {
@@ -16,6 +23,7 @@ def serialize_course(db, course: Course) -> dict:
         "chapterCount": course.chapter_count or 0,
         "knowledgePointCount": db.query(KnowledgePoint).filter(KnowledgePoint.course_id == course.id).count(),
         "materialCount": db.query(CourseMaterial).filter(CourseMaterial.course_id == course.id).count(),
+        "questionCount": count_course_questions(db, course.id),
     }
 
 

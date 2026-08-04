@@ -4,10 +4,11 @@ import { useApp } from "./contexts/useApp";
 import LoginPage from "./pages/LoginPage";
 import PositionSelectPage from "./pages/PositionSelectPage";
 import CourseSelectPage from "./pages/CourseSelectPage";
+import PretestPage from "./pages/PretestPage";
 import LearningPage from "./pages/LearningPage";
 import AdminPage from "./pages/AdminPage";
 
-type Route = "login" | "positions" | "courses" | "learning" | "admin" | "notfound";
+type Route = "login" | "positions" | "courses" | "pretest" | "learning" | "admin" | "notfound";
 
 function Router() {
   const { isAuthenticated, selectedPosition, selectedCourse, user } = useApp();
@@ -21,6 +22,7 @@ function Router() {
     if (path === "/login") setRoute("login");
     else if (path === "/positions") setRoute("positions");
     else if (path === "/courses") setRoute("courses");
+    else if (path === "/pretest") setRoute("pretest");
     else if (path.startsWith("/learning")) setRoute("learning");
     else if (path.startsWith("/admin")) setRoute("admin");
     else setRoute("notfound");
@@ -76,6 +78,7 @@ function Router() {
   }, [isAuthenticated, user]);
 
   const navigateToCourses = () => { window.location.hash = "#/courses"; };
+  const navigateToPretest = () => { window.location.hash = "#/pretest"; };
   const navigateToLearning = () => {
     window.location.hash = "#/learning?tab=qa";
   };
@@ -89,7 +92,9 @@ function Router() {
     case "positions":
       return <PositionSelectPage onNext={navigateToCourses} />;
     case "courses":
-      return <CourseSelectPage onNext={navigateToLearning} onBack={goBackToPositions} />;
+      return <CourseSelectPage onNext={navigateToPretest} onBack={goBackToPositions} />;
+    case "pretest":
+      return <PretestPage onDone={navigateToLearning} onBack={navigateToCourses} />;
     case "learning":
       return <LearningPage />;
     case "admin":
