@@ -18,9 +18,14 @@ export default function LearningPlatformView() {
 
   useEffect(() => {
     const load = async () => {
+      if (!selectedCourse?.id) {
+        setChapters([]);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
-        const result = await api.learning.getChapters(selectedCourse?.id || "");
+        const result = await api.learning.getChapters(selectedCourse.id, selectedCourse.name);
         setChapters(result || []);
       } catch {
         setChapters([]);
@@ -29,7 +34,7 @@ export default function LearningPlatformView() {
       }
     };
     load();
-  }, [selectedCourse]);
+  }, [selectedCourse?.id, selectedCourse?.name]);
 
   if (loading) {
     return (
@@ -67,8 +72,14 @@ export default function LearningPlatformView() {
       {chapters.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center animate-fade-in-up">
           <BookOpen className="w-8 h-8 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-700 mb-2">暂无学习资料</h3>
-          <p className="text-sm text-gray-500">该课程暂时没有可用的章节内容。</p>
+          <h3 className="text-lg font-semibold text-gray-700 mb-2">
+            {selectedCourse ? "暂无学习资料" : "请先选择课程"}
+          </h3>
+          <p className="text-sm text-gray-500">
+            {selectedCourse
+              ? "该课程暂时没有可用的章节内容，请确认已上传知识库 PDF，或课程名称能匹配内置知识库。"
+              : "登录后需要先选择岗位和课程，学习平台才会加载对应资料。"}
+          </p>
         </div>
       ) : (
         <div className="space-y-4 animate-stagger">

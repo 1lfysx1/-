@@ -9,6 +9,7 @@ from app.models.feedback import Feedback
 from app.models.knowledge import CourseMaterial, DocChunk, KnowledgePoint
 from app.models.position import Course, Position
 from app.models.question import AnswerRecord, Question, UserKpMastery
+from app.services.rag_service import ensure_builtin_course_index, get_course_rag_status, reindex_course_embeddings
 from app.utils.security import get_current_admin_id
 from pydantic import BaseModel
 
@@ -384,5 +385,49 @@ def delete_position(pos_id: str, admin_id: str = Depends(get_current_admin_id)):
         return {"success": True}
     finally:
         db.close()
+
+
+@router.get("/courses/{course_id}/rag-status")
+def get_course_rag_status_admin(course_id: str, admin_id: str = Depends(get_current_admin_id)):
+    return {"success": True, "data": get_course_rag_status(course_id)}
+
+
+@router.get("/courses/{course_id}/chunks")
+def get_course_chunks(course_id: str, admin_id: str = Depends(get_current_admin_id)):
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(DocChunk, CourseMaterial)
+            .join(CourseMaterial, CourseMaterial.id == DocChunk.material_id)
+            .filter(CourseMaterial.course_id == course_id)
+            .order_by(DocChunk.chunk_index.asc())
+            .limit(200)
+            .all()
+        )
+        return {
+            "success": True,
+            "data": [
+                {
+                    "id": chunk.id,
+                    "materialId": chunk.material_id,
+                    "filename": material.filename,
+                    "chunkIndex": chunk.chunk_index,
+                    "chapter": chunk.chapter or "",
+                    "page": chunk.page or 1,
+                    "content": chunk.content,
+                    "hasEmbedding": bool(chunk.embedding),
+                }
+                for chunk, material in rows
+            ],
+        }
+    finally:
+        db.close()
+
+
+@router.post("/courses/{course_id}/reindex")
+async def reindex_course(course_id: str, admin_id: str = Depends(get_current_admin_id)):
+    await ensure_builtin_course_index(course_id)
+    data = await reindex_course_embeddings(course_id)
+    return {"success": True, "data": data}
 
 

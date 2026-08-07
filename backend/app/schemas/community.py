@@ -1,1 +1,0 @@
-# Auto-generated schema file

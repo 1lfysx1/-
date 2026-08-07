@@ -2,6 +2,7 @@
 import json
 import re
 import uuid
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -129,9 +130,12 @@ async def index_knowledge_pdf(course_id: str, material: CourseMaterial, pdf_path
         db.flush()
 
         indexed = 0
+        embedding_success = 0
         for index, chunk in enumerate(chunks):
             content = chunk["content"]
             embedding = await compute_embedding(content)
+            if embedding:
+                embedding_success += 1
             db.add(DocChunk(
                 id=str(uuid.uuid4()),
                 material_id=material.id,
@@ -147,7 +151,13 @@ async def index_knowledge_pdf(course_id: str, material: CourseMaterial, pdf_path
         if indexed:
             course.chapter_count = max(course.chapter_count or 0, len({chunk["chapter"] for chunk in chunks}))
         db.commit()
-        return {"pages": len(pages), "chunks": indexed, "knowledgePoints": created_kps}
+        return {
+            "pages": len(pages),
+            "chunks": indexed,
+            "knowledgePoints": created_kps,
+            "embeddingSuccess": embedding_success,
+            "indexedAt": datetime.now().isoformat(),
+        }
     except Exception:
         db.rollback()
         raise
@@ -165,24 +175,84 @@ def _clean_question_text(text_content: str) -> str:
     return text_content
 
 
+_QUESTION_BANK_CHAPTER_PREFIX = re.compile(
+    r"^(?:第[一二三四五六七八九十百\d]+[章节部分篇](?:\s*[:\uff1a、.\-]?\s*)|[一二三四五六七八九十]+[、.](?:\s*[:\uff1a、.\-]?\s*)|(?:\d+\.)+\d+(?:\s+|[:\uff1a、.\-]\s*))"
+)
+
+
+def _is_question_bank_chapter(line: str) -> bool:
+    cleaned = line.strip()
+    if not cleaned or len(cleaned) > 80:
+        return False
+    if "?" in cleaned or "？" in cleaned or "。" in cleaned or "．" in cleaned:
+        return False
+    if not _QUESTION_BANK_CHAPTER_PREFIX.match(cleaned):
+        return False
+    tail = _QUESTION_BANK_CHAPTER_PREFIX.sub("", cleaned)
+    if re.match(r"^(选择|判断|填空|多选|单选|简答|问答|名词解释)", tail):
+        return False
+    return True
+
+
 def parse_question_bank_text(text_content: str) -> list[dict]:
     text_content = _clean_question_text(text_content)
     question_start = re.compile(r"(?m)^\s*(?:\d+|[一二三四五六七八九十]+)[.、]\s*(?:【([^】]+)】)?\s*(.+?)\s*$")
-    matches = list(question_start.finditer(text_content))
+    standalone_number = re.compile(
+        "^(?:[0-9]+|[一二三四五六七八九十]+)[.\u3001]\\s*$"
+    )
+    lines = text_content.splitlines()
     parsed: list[dict] = []
     current_chapter = "综合题库"
 
-    for index, match in enumerate(matches):
-        heading = detect_heading(match.group(2))
-        if heading and "?" not in heading and "？" not in heading:
-            current_chapter = heading
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip()
+        if not line:
+            index += 1
+            continue
+        if _is_question_bank_chapter(line):
+            current_chapter = line[:100]
+            index += 1
+            continue
+        match = question_start.match(line)
+        if not match and standalone_number.match(line) and index + 1 < len(lines):
+            combined = f"{line} {lines[index + 1].strip()}"
+            match = question_start.match(combined)
+            if match:
+                index += 1
+        if not match:
+            index += 1
             continue
 
-        start = match.end()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text_content)
-        block = text_content[start:end]
         stem = match.group(2).strip()
         type_hint = (match.group(1) or "").strip()
+
+        stem_parts = [stem]
+        cursor = index + 1
+        while cursor < len(lines):
+            piece = lines[cursor].strip()
+            if not piece:
+                cursor += 1
+                continue
+            if re.match("^\\s*[A-D][.\u3001]\\s*", piece):
+                break
+            if re.match("^\\s*(?:\u7b54\u6848|\u6b63\u786e\u7b54\u6848)[:\uff1a]\\s*", piece):
+                break
+            if question_start.match(piece) or standalone_number.match(piece) or _is_question_bank_chapter(piece):
+                break
+            stem_parts.append(piece)
+            cursor += 1
+        stem = "".join(stem_parts).strip()[:500]
+        block_end = index + 1
+        while block_end < len(lines):
+            next_line = lines[block_end].strip()
+            if not next_line:
+                block_end += 1
+                continue
+            if question_start.match(next_line) or standalone_number.match(next_line) or _is_question_bank_chapter(next_line):
+                break
+            block_end += 1
+        block = "\n".join(lines[index + 1:block_end])
 
         options = [
             {"key": key.upper(), "text": value.strip()}
@@ -190,6 +260,7 @@ def parse_question_bank_text(text_content: str) -> list[dict]:
         ]
         answer_match = re.search(r"答案：\s*([A-D]+|正确|错误|对|错|√|×|TRUE|FALSE)", block, re.IGNORECASE)
         if not answer_match:
+            index = block_end
             continue
 
         answer_text = answer_match.group(1).strip().upper()
@@ -210,6 +281,7 @@ def parse_question_bank_text(text_content: str) -> list[dict]:
             answer = answer_text[0]
 
         if len(stem) < 4 or (q_type != "judge" and len(options) < 2):
+            index = block_end
             continue
 
         parsed.append({
@@ -220,6 +292,7 @@ def parse_question_bank_text(text_content: str) -> list[dict]:
             "answer": answer,
             "explanation": explanation[:1000],
         })
+        index = block_end
     return parsed
 
 
@@ -279,7 +352,12 @@ def import_question_bank_pdf(course_id: str, pdf_path: Path) -> dict:
                 ))
                 imported += 1
         db.commit()
-        return {"questions": len(questions), "imported": imported, "updated": updated}
+        return {
+            "questions": len(questions),
+            "imported": imported,
+            "updated": updated,
+            "indexedAt": datetime.now().isoformat(),
+        }
     except Exception:
         db.rollback()
         raise

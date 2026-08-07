@@ -74,70 +74,172 @@ def _parse_knowledge_base_points(filepath):
     return numbered_points or points
 
 
+_MD_CHAPTER_HEADING = re.compile(r"^##\s+(.+?)\s*$")
+_MD_SUB_HEADING = re.compile(r"^####\s+(.+?)\s*$")
+_MD_FULL_QUESTION = re.compile(r"^\*\*(\d+)[.、]\s*(?:【([^】]+)】\s*)?(.+?)\*\*\s*(?:[（(]\s*[）)]\s*)?$")
+_MD_SPLIT_QUESTION = re.compile(r"^\*\*(\d+)[.、]\s*(?:【([^】]+)】\s*)?\*\*\s*(.+?)\s*$")
+_MD_OPTION = re.compile(r"^\s*(?:-\s+)?([A-D])[.、]\s*(.+?)\s*$", re.MULTILINE)
+_MD_ANSWER = re.compile(r"(?:\*\*答案[：:]\s*\*\*|\*\*答案[：:])\s*([A-D]+|正确|错误|对|错|√|×|v|x|TRUE|FALSE)", re.IGNORECASE)
+_MD_EXPLANATION = re.compile(r"(?:\*\*解析[：:]\s*\*\*|\*\*解析\*\*[：:])\s*(.+?)(?:\n\s*</details>|\Z)", re.DOTALL)
+_MD_ANSWER_ENTRY = re.compile(r"^(\d+)[.、]\s*\*\*([^*]+)\*\*\s*[-—–:：]?\s*(.*)$")
+
+
+def _md_normalize_group(title: str) -> str:
+    title = re.sub(r"[（(].*?[）)]", "", title.strip())
+    return title.strip().rstrip("答案").strip()
+
+
+def _md_question_kind(group: str, hint: str) -> str | None:
+    text = f"{group} {hint}"
+    if "判断" in text:
+        return "judge"
+    if "多选" in text:
+        return "multiple"
+    if "选择" in text or "单选" in text:
+        return "single"
+    return None
+
+
+def _apply_md_answer(question: dict, value: str, explanation: str) -> None:
+    value_upper = value.strip().upper()
+    if question["type"] == "judge":
+        if value_upper in {"正确", "对", "√", "V", "TRUE"}:
+            answer = "A"
+        elif value_upper in {"错误", "错", "×", "X", "FALSE"}:
+            answer = "B"
+        else:
+            return
+        question["options"] = [{"key": "A", "text": "正确"}, {"key": "B", "text": "错误"}]
+        question["answer"] = answer
+    else:
+        keys = re.findall(r"[A-D]", value_upper)
+        if not keys:
+            return
+        question["answer"] = keys if question["type"] == "multiple" else keys[0]
+    if explanation:
+        question["explanation"] = re.sub(r"\s+", " ", explanation).strip()
+    question["_answered"] = True
+
+
 def _parse_knowledge_base_questions(filepath):
     if not filepath or not filepath.exists():
         return []
     lines = filepath.read_text(encoding="utf-8").splitlines()
+    chapter_titles = [
+        match.group(1).strip()
+        for line in lines
+        if (match := _MD_CHAPTER_HEADING.match(line))
+    ]
+    prefer_numbered = any(re.match(r"^\d+\s+", title) for title in chapter_titles)
+
+    def is_usable_chapter(title: str) -> bool:
+        return not (
+            title == "目录"
+            or title.startswith(("📖", "📝", "✅"))
+            or title.startswith("附录")
+            or "阶段" in title
+        )
+
     questions = []
+    pending = {}
     current_part = None
     current_chapter = None
+    current_group = None
     index = 0
     while index < len(lines):
-        part_match = re.match(r"^#\s+(.+?)\s*$", lines[index])
+        line = lines[index]
+        part_match = re.match(r"^#\s+(.+?)\s*$", line)
         if part_match:
             current_part = _part_number(part_match.group(1))
-        chapter_match = re.match(r"^##\s+(.+?)\s*$", lines[index])
-        if chapter_match and re.match(r"^\d+\s+", chapter_match.group(1).strip()):
-            current_chapter = chapter_match.group(1).strip()
-        question_match = re.match(r"^\*\*\d+[.、]\s*【([^】]+)】\s*(.+?)\*\*\s*$", lines[index])
-        if not question_match:
             index += 1
             continue
 
-        question_type = question_match.group(1)
+        chapter_match = _MD_CHAPTER_HEADING.match(line)
+        if chapter_match:
+            title = chapter_match.group(1).strip()
+            if is_usable_chapter(title) and (not prefer_numbered or re.match(r"^\d+\s+", title)):
+                current_chapter = title
+            index += 1
+            continue
+
+        sub_match = _MD_SUB_HEADING.match(line)
+        if sub_match:
+            sub_title = sub_match.group(1).strip()
+            if "答案" in sub_title:
+                answer_group = _md_normalize_group(sub_title)
+                entry_index = index + 1
+                while entry_index < len(lines):
+                    next_line = lines[entry_index].strip()
+                    if not next_line:
+                        entry_index += 1
+                        continue
+                    if (
+                        re.match(r"^#{1,4}\s+", lines[entry_index])
+                        or _MD_FULL_QUESTION.match(next_line)
+                        or _MD_SPLIT_QUESTION.match(next_line)
+                    ):
+                        break
+                    entry = _MD_ANSWER_ENTRY.match(next_line)
+                    if entry:
+                        question = pending.get((current_chapter, answer_group, int(entry.group(1))))
+                        if question is not None:
+                            _apply_md_answer(question, entry.group(2), entry.group(3))
+                    entry_index += 1
+                current_group = None
+                index = entry_index
+                continue
+            current_group = _md_normalize_group(sub_title)
+            index += 1
+            continue
+
+        question_match = _MD_FULL_QUESTION.match(line)
+        if question_match is None:
+            question_match = _MD_SPLIT_QUESTION.match(line)
+        if question_match is None:
+            index += 1
+            continue
+
+        number = int(question_match.group(1))
+        hint = (question_match.group(2) or "").strip()
+        stem = question_match.group(3).strip()
         block_start = index + 1
         block_end = block_start
-        while block_end < len(lines) and not re.match(r"^\*\*\d+[.、]\s*【", lines[block_end]):
+        while block_end < len(lines):
+            next_line = lines[block_end]
+            if (
+                re.match(r"^#{1,4}\s+", next_line)
+                or _MD_FULL_QUESTION.match(next_line)
+                or _MD_SPLIT_QUESTION.match(next_line)
+            ):
+                break
             block_end += 1
         block = "\n".join(lines[block_start:block_end])
         options = [
             {"key": key, "text": text.strip()}
-            for key, text in re.findall(r"^-\s+([A-D])\.\s*(.+?)\s*$", block, re.MULTILINE)
+            for key, text in _MD_OPTION.findall(block)
         ]
-        answer_match = re.search(r"\*\*答案：\s*(.+?)\s*\*\*", block)
-        if not answer_match:
-            index = block_end
-            continue
-        answer_text = answer_match.group(1).strip()
-        explanation_match = re.search(r"\*\*解析：\*\*\s*(.+?)(?:\n\s*</details>|\Z)", block, re.DOTALL)
-        explanation = re.sub(r"\s+", " ", explanation_match.group(1)).strip() if explanation_match else ""
-        if question_type == "判断题":
-            options = [{"key": "A", "text": "正确"}, {"key": "B", "text": "错误"}]
-            answer = "A" if answer_text == "正确" else "B" if answer_text == "错误" else answer_text
-            normalized_type = "judge"
-        else:
-            answer_keys = re.findall(r"[A-D]", answer_text.upper())
-            answer = answer_keys if question_type == "多选题" else (answer_keys[0] if answer_keys else answer_text)
-            normalized_type = "multiple" if question_type == "多选题" else "single"
-        questions.append({
+        question = {
             "part": current_part,
             "chapter": current_chapter,
-            "type": normalized_type,
-            "stem": question_match.group(2).strip(),
+            "type": _md_question_kind(current_group or "", hint) or "single",
+            "stem": stem,
             "options": options,
-            "answer": answer,
-            "explanation": explanation,
-        })
-        for line in lines[block_start:block_end]:
-            part_match = re.match(r"^#\s+(.+?)\s*$", line)
-            if part_match:
-                current_part = _part_number(part_match.group(1))
-            chapter_match = re.match(r"^##\s+(.+?)\s*$", line)
-            if chapter_match and re.match(r"^\d+\s+", chapter_match.group(1).strip()):
-                current_chapter = chapter_match.group(1).strip()
+            "answer": None,
+            "explanation": "",
+            "_answered": False,
+        }
+        questions.append(question)
+        inline_answer = _MD_ANSWER.search(block)
+        if inline_answer:
+            explanation_match = _MD_EXPLANATION.search(block)
+            explanation = re.sub(r"\s+", " ", explanation_match.group(1)).strip() if explanation_match else ""
+            _apply_md_answer(question, inline_answer.group(1), explanation)
+        else:
+            group = _md_normalize_group(current_group or "") or _md_normalize_group(hint or "")
+            pending[(current_chapter, group, number)] = question
         index = block_end
-    return questions
 
+    return [q for q in questions if q.get("_answered")]
 
 def _sync_course_questions(db, course):
     filepath = _find_knowledge_base(course.name)

@@ -31,15 +31,64 @@ export interface Course {
 }
 
 export interface QASource {
+  chunkId: string;
+  materialId?: string;
+  courseId?: string;
+  filename?: string;
   chapter: string;
   page: number;
+  content?: string;
   snippet: string;
-  chunkId: string;
+  score?: number;
+  retrievalMode?: "vector" | "keyword" | "none";
+}
+
+export interface QARagTraceStep {
+  title: string;
+  detail: string;
+}
+
+export interface QARagTrace {
+  question: string;
+  courseId: string;
+  usedContext: boolean;
+  retrievalMode: "vector" | "keyword" | "none";
+  sourceCount: number;
+  steps: QARagTraceStep[];
+  topSources?: QASource[];
+  answerPreview?: string;
 }
 
 export interface QAResponse {
   answer: string;
   sources: QASource[];
+  ragTrace?: QARagTrace;
+  usedContext?: boolean;
+  retrievalMode?: "vector" | "keyword" | "none";
+  sessionId?: string;
+}
+
+export interface CourseRagStatus {
+  courseId: string;
+  status: "empty" | "parsed" | "partial" | "indexed";
+  statusText: string;
+  materialCount: number;
+  chunkCount: number;
+  knowledgePointCount: number;
+  questionCount: number;
+  embeddingSuccess: number;
+  latestUpload: string;
+}
+
+export interface CourseChunk {
+  id: string;
+  materialId: string;
+  filename: string;
+  chunkIndex: number;
+  chapter: string;
+  page: number;
+  content: string;
+  hasEmbedding: boolean;
 }
 
 export interface Step {

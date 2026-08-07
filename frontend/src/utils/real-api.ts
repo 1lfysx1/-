@@ -3,6 +3,8 @@
   CommunityDetail,
   CommunityQuestion,
   Course,
+  CourseChunk,
+  CourseRagStatus,
   ExerciseResponse,
   ExerciseKnowledgePoint,
   PretestResponse,
@@ -137,8 +139,15 @@ export const api = {
   },
 
   learning: {
-    getChapters: async (courseId: string): Promise<Chapter[]> =>
-      (await get<ApiEnvelope<Chapter[]>>(`/learning/chapters?course_id=${encodeURIComponent(courseId)}`)).data,
+    getChapters: async (courseId?: string, courseName?: string): Promise<Chapter[]> => {
+      const params = new URLSearchParams();
+      if (courseId) params.set("course_id", courseId);
+      if (courseName) params.set("course_name", courseName);
+      const query = params.toString() ? `?${params.toString()}` : "";
+      return (await get<ApiEnvelope<Chapter[]>>(`/learning/chapters${query}`)).data;
+    },
+    getCourseRagStatus: async (courseId: string): Promise<CourseRagStatus> =>
+      (await get<ApiEnvelope<CourseRagStatus>>(`/learning/courses/${encodeURIComponent(courseId)}/rag-status`)).data,
     generateExercise: async (kpIds: string[]): Promise<Question[]> => {
       const query = kpIds.length > 0 ? `?kp_ids=${encodeURIComponent(kpIds.join(","))}` : "";
       return (await get<ApiEnvelope<Question[]>>(`/exercise/questions${query}`)).data;
@@ -231,7 +240,13 @@ export const api = {
       (await del<ApiEnvelope<{ materials: number; knowledgePoints: number; questions: number; chunks: number }>>(`/admin/courses/${encodeURIComponent(courseId)}`)).data,
     deletePosition: (positionId: string): Promise<{ success: boolean }> =>
       del(`/admin/positions/${encodeURIComponent(positionId)}`),
-    uploadKnowledgeBase: async (courseId: string, file: File): Promise<ApiEnvelope<{ materialId: string; pages: number; chunks: number; knowledgePoints: number }>> =>
+    getCourseRagStatus: async (courseId: string): Promise<CourseRagStatus> =>
+      (await get<ApiEnvelope<CourseRagStatus>>(`/admin/courses/${encodeURIComponent(courseId)}/rag-status`)).data,
+    getCourseChunks: async (courseId: string): Promise<CourseChunk[]> =>
+      (await get<ApiEnvelope<CourseChunk[]>>(`/admin/courses/${encodeURIComponent(courseId)}/chunks`)).data,
+    reindexCourse: async (courseId: string): Promise<{ chunks: number; embeddingSuccess: number; indexedAt: string }> =>
+      (await post<ApiEnvelope<{ chunks: number; embeddingSuccess: number; indexedAt: string }>>(`/admin/courses/${encodeURIComponent(courseId)}/reindex`)).data,
+    uploadKnowledgeBase: async (courseId: string, file: File): Promise<ApiEnvelope<{ materialId: string; pages: number; chunks: number; knowledgePoints: number; embeddingSuccess: number; indexedAt: string }>> =>
       uploadFile("/upload/knowledge-base", file, { course_id: courseId }),
     uploadQuestionBank: async (courseId: string, file: File): Promise<ApiEnvelope<{ materialId: string; questions: number; imported: number; updated: number }>> =>
       uploadFile("/upload/question-bank", file, { course_id: courseId }),

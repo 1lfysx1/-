@@ -88,6 +88,8 @@ export default function ExerciseView() {
     return true;
   });
 
+  const availableKps = knowledgePoints.filter((kp) => kp.availableQuestionCount > 0);
+
   if (phase === "start") {
     return (
       <div className="max-w-3xl mx-auto">
@@ -103,14 +105,14 @@ export default function ExerciseView() {
           <div className="flex justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-orange-400" />
           </div>
-        ) : knowledgePoints.length === 0 ? (
+        ) : availableKps.length === 0 ? (
           <div className="text-center py-12 text-sm text-gray-400">
-            {error || (selectedCourse ? "当前课程暂无知识点" : "请先选择课程")}
+            {error || (selectedCourse ? "当前课程暂无可用题目" : "请先选择课程")}
           </div>
         ) : (
           <>
             <div className="grid grid-cols-2 gap-3 mb-6 animate-stagger">
-              {knowledgePoints.map((kp) => {
+              {availableKps.map((kp) => {
                 const selected = selectedKps.includes(kp.id);
                 return (
                   <button

@@ -4,6 +4,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources?: QAResponse["sources"];
+  ragTrace?: QAResponse["ragTrace"];
 }
 
 export interface ChatState {
@@ -99,7 +100,15 @@ export async function askQuestion(key: string, question: string, courseId?: stri
     const result = await api.qa.ask(text, courseId);
     const latest = ensureState(key);
     updateState(key, {
-      messages: [...latest.messages, { role: "assistant", content: result.answer, sources: result.sources }],
+      messages: [
+        ...latest.messages,
+        {
+          role: "assistant",
+          content: result.answer,
+          sources: result.sources,
+          ragTrace: result.ragTrace,
+        },
+      ],
       loading: false,
     });
   } catch (error) {

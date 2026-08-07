@@ -49,12 +49,25 @@ def ensure_community_columns():
             if column not in existing:
                 conn.execute(text(f"ALTER TABLE community_questions ADD COLUMN {column} {ddl}"))
 
+def ensure_knowledge_columns():
+    if engine.dialect.name != "sqlite":
+        return
+    required = {
+        "embedding": "TEXT",
+    }
+    with engine.begin() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(doc_chunks)")).fetchall()}
+        for column, ddl in required.items():
+            if column not in existing:
+                conn.execute(text(f"ALTER TABLE doc_chunks ADD COLUMN {column} {ddl}"))
+
 def init_database():
     print("Initializing database...")
     # Tables kept - no drop on restart
     Base.metadata.create_all(bind=engine)
     ensure_experiment_columns()
     ensure_community_columns()
+    ensure_knowledge_columns()
     db = SessionLocal()
     try:
         if db.query(User).count() > 0:

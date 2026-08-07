@@ -1,23 +1,25 @@
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 
 from app.config import KNOWLEDGE_BASE_DIR
 from app.database import SessionLocal
 from app.models.knowledge import CourseMaterial, DocChunk
 from app.models.position import Course
+from app.services.rag_service import ensure_builtin_course_index, get_course_rag_status
 
 router = APIRouter(prefix="/api/learning", tags=["Learning"])
 
 NAME_TO_FILE = [
-    ("Python", ("程序员类", "python_knowledge_base.md")),
-    ("Java", ("程序员类", "Java_Knowledge_Base.md")),
-    ("C语言", ("程序员类", "C语言知识库.md")),
-    ("SQL", ("程序员类", "SQL从入门到精通知识库.md")),
-    ("前端", ("程序员类", "前端知识库.md")),
-    ("ML", ("程序员类", "ML_Knowledge_Base.md")),
-    ("机器学习", ("程序员类", "ML_Knowledge_Base.md")),
+("Python", ("程序员类", "python", "python_knowledge_base.md")),
+("python", ("程序员类", "python", "python_knowledge_base.md")),
+("Java", ("程序员类", "java", "Java_Knowledge_Base.md")),
+("C语言", ("程序员类", "c语言", "C语言知识库.md")),
+("SQL", ("程序员类", "sql", "SQL从入门到精通知识库.md")),
+("前端", ("程序员类", "前端", "前端知识库.md")),
+("ML", ("程序员类", "ai", "ML_Knowledge_Base.md")),
+("机器学习", ("程序员类", "ai", "ML_Knowledge_Base.md")),
     ("养老", ("养老", "养老护理员知识库_从入门到精通.md")),
     ("税法", ("税法会计类", "税法知识库_从入门到精通.md")),
     ("会计", ("税法会计类", "税法知识库_从入门到精通.md")),
@@ -143,7 +145,7 @@ def parse_uploaded_chapters(course_id: str) -> list[dict]:
 
 
 @router.get("/chapters")
-def get_chapters(course_id: str | None = Query(default=None), course_name: str | None = Query(default=None)):
+def get_chapters(course_id: str | None = None, course_name: str | None = None):
     resolved_name = course_name or ""
     if course_id:
         uploaded = parse_uploaded_chapters(course_id)
@@ -164,3 +166,9 @@ def get_chapters(course_id: str | None = Query(default=None), course_name: str |
     if not matched_file:
         return {"success": True, "data": []}
     return {"success": True, "data": parse_md_chapters(matched_file, course_id or "")}
+
+
+@router.get("/courses/{course_id}/rag-status")
+async def get_course_rag_status_view(course_id: str):
+    await ensure_builtin_course_index(course_id)
+    return {"success": True, "data": get_course_rag_status(course_id)}
